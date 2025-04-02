@@ -1,143 +1,76 @@
-let audioCtx;
-let noiseSource, droneSource, filter, gainNode, reverb, reverbGain;
+let audioCtx, oscillator, gainNode, convolver, reverbGain;
 let isPlaying = false;
 
-const startButton = document.getElementById("startButton");
-const stopButton = document.getElementById("stopButton");
-const reverbSlider = document.getElementById("reverbSlider");
-
-startButton.addEventListener("click", startAudio);
-stopButton.addEventListener("click", stopAudio);
-reverbSlider.addEventListener("input", updateReverb);
-document.addEventListener("mousemove", changeSound);
-
-function initAudioContext() {
-  if (!audioCtx) {
+document.getElementById("start").addEventListener("click", () => {
+  if (!isPlaying) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    console.log("Audio context initialized");
+    oscillator = audioCtx.createOscillator();
+    gainNode = audioCtx.createGain();
+    convolver = audioCtx.createConvolver();
+    reverbGain = audioCtx.createGain();
+
+    // Set up sine wave
+    oscillator.type = "sine";
+    oscillator.frequency.value = 440;
+
+    // Generate a simple impulse response for reverb
+    function createReverbBuffer(audioCtx) {
+      let length = audioCtx.sampleRate * 2;
+      let impulse = audioCtx.createBuffer(2, length, audioCtx.sampleRate);
+      for (let channel = 0; channel < 2; channel++) {
+        let impulseData = impulse.getChannelData(channel);
+        for (let i = 0; i < length; i++) {
+          impulseData[i] = (Math.random() * 2 - 1) * (1 - i / length);
+        }
+      }
+      return impulse;
+    }
+
+    convolver.buffer = createReverbBuffer(audioCtx);
+
+    // Connect nodes
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    gainNode.connect(convolver);
+    convolver.connect(reverbGain);
+    reverbGain.connect(audioCtx.destination);
+
+    // Start the oscillator
+    oscillator.start();
+    isPlaying = true;
   }
-}
+});
 
-async function startAudio() {
-  initAudioContext(); // Ensure audio context is created
-  if (isPlaying) return;
-  isPlaying = true;
-
-  console.log("Starting audio...");
-
-  // Create master gain
-  gainNode = audioCtx.createGain();
-  gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
-
-  // Create filter
-  filter = audioCtx.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.setValueAtTime(800, audioCtx.currentTime);
-
-  // Create reverb
-  reverb = audioCtx.createConvolver();
-  reverbGain = audioCtx.createGain();
-  reverbGain.gain.setValueAtTime(
-    parseFloat(reverbSlider.value),
-    audioCtx.currentTime
-  );
-
-  await loadReverbImpulse(); // Load impulse response for reverb
-
-  createNoise();
-  createDrone();
-
-  console.log("Audio started.");
-}
-
-function stopAudio() {
-  if (!isPlaying) return;
-  isPlaying = false;
-
-  console.log("Stopping audio...");
-
-  if (noiseSource) {
-    noiseSource.stop();
-    noiseSource.disconnect();
-    noiseSource = null;
+document.getElementById("stop").addEventListener("click", () => {
+  if (isPlaying) {
+    oscillator.stop();
+    audioCtx.close();
+    isPlaying = false;
   }
-  if (droneSource) {
-    droneSource.stop();
-    droneSource.disconnect();
-    droneSource = null;
+});
+
+document.addEventListener("mousemove", (event) => {
+  if (isPlaying) {
+    let frequency = 100 + (event.clientY / window.innerHeight) * 900;
+    oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+
+    // Change background color based on frequency
+    const colors = [
+      "#ff0000",
+      "#ff7f00",
+      "#ffff00",
+      "#00ff00",
+      "#0000ff",
+      "#4b0082",
+      "#9400d3",
+    ];
+    let index = Math.floor(((frequency - 100) / 900) * (colors.length - 1));
+    document.body.style.backgroundColor = colors[index];
   }
+});
 
-  console.log("Audio stopped.");
-}
-
-function createNoise() {
-  console.log("Creating noise...");
-
-  const bufferSize = 2 * audioCtx.sampleRate;
-  const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-  const output = noiseBuffer.getChannelData(0);
-
-  for (let i = 0; i < bufferSize; i++) {
-    output[i] = Math.random() * 2 - 1; // White noise
+document.getElementById("reverb").addEventListener("input", (event) => {
+  if (isPlaying) {
+    reverbGain.gain.value = event.target.value;
   }
-
-  noiseSource = audioCtx.createBufferSource();
-  noiseSource.buffer = noiseBuffer;
-  noiseSource.loop = true;
-
-  noiseSource.connect(filter);
-  filter.connect(reverb);
-  reverb.connect(reverbGain);
-  reverbGain.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
-
-  noiseSource.start();
-  console.log("Noise started.");
-}
-
-function createDrone() {
-  console.log("Creating drone...");
-
-  droneSource = audioCtx.createOscillator();
-  droneSource.type = "sine";
-  droneSource.frequency.setValueAtTime(100, audioCtx.currentTime);
-
-  droneSource.connect(filter);
-  filter.connect(reverb);
-  reverb.connect(reverbGain);
-  reverbGain.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
-
-  droneSource.start();
-  console.log("Drone started.");
-}
-
-async function loadReverbImpulse() {
-  try {
-    console.log("Loading reverb impulse...");
-    const response = await fetch("your-impulse-response.wav"); // Replace with actual impulse response
-    const arrayBuffer = await response.arrayBuffer();
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    reverb.buffer = audioBuffer;
-    console.log("Reverb loaded.");
-  } catch (error) {
-    console.warn("Reverb impulse failed to load, using dry signal.");
-  }
-}
-
-function updateReverb() {
-  if (reverbGain) {
-    reverbGain.gain.setValueAtTime(
-      parseFloat(reverbSlider.value),
-      audioCtx.currentTime
-    );
-  }
-}
-
-function changeSound(event) {
-  if (filter) {
-    let freq = 200 + (event.clientX / window.innerWidth) * 1000;
-    filter.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    console.log(`Filter frequency changed: ${freq}`);
-  }
-}
+});
